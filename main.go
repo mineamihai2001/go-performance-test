@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"insert-performance-test/cli"
 	"io"
 	"net/http"
 	"os"
@@ -37,9 +38,7 @@ func worker(index int, responses chan<- Response, jobs <-chan int, wg *sync.Wait
 	defer wg.Done()
 	concurrent++
 	for range jobs {
-		// fmt.Printf("worker %d started job %d\n", index, j)
 		request(index, responses, t)
-		// fmt.Printf("worker %d finished job %d\n", index, j)
 	}
 }
 
@@ -105,40 +104,67 @@ func saveResponses(responses *[]Response) {
 }
 
 func main() {
-	args := os.Args[1:]
-	var total int = 1
-	var t Type = DB
-	if len(args) != 0 {
-		number, err := strconv.Atoi(args[0])
-		if err == nil {
-			total = number
-		}
-		if len(args) > 1 && args[1] == "bucket" {
-			t = BUCKET
-		}
-	}
+	manager := cli.Create()
 
-	fmt.Printf(">>> [INFO] - Started %d requests\n\n", total)
+	var totalWorkers int = 20
+	var totalRequest int = 1
+	var insertType Type = DB
+
+	manager.Add(&cli.Command{
+		Name:        "total",
+		Short:       "t",
+		Description: "The total number of requests that are going to be fired",
+		Handler: func(params ...string) {
+			total, _ := strconv.Atoi(params[0])
+			totalRequest = total
+		},
+	})
+
+	manager.Add(&cli.Command{
+		Name:        "workers",
+		Short:       "t",
+		Description: "Number of workers which will process the requests. (defaults to 20)",
+		Handler: func(params ...string) {
+			workers, _ := strconv.Atoi(params[0])
+			totalWorkers = workers
+		},
+	})
+
+	manager.Add(&cli.Command{
+		Name:        "insert",
+		Short:       "i",
+		Description: "Type of insert that will be made options: bucket | db (defaults to db)",
+		Handler: func(params ...string) {
+			if params[0] == "bucket" {
+				insertType = BUCKET
+			} else {
+				insertType = DB
+			}
+		},
+	})
+
+	manager.Start()
+
+	fmt.Printf(">>> [INFO] - Started %d requests\n\n", totalRequest)
 
 	conns = 0
 	concurrent = 0
 	start := time.Now()
 
-	maxWorkers := 20
 	var results []Response
 	var wg sync.WaitGroup
-	responses := make(chan Response, total)
-	jobs := make(chan int, total)
+	responses := make(chan Response, totalRequest)
+	jobs := make(chan int, totalRequest)
 
-	for i := 0; i < maxWorkers; i++ {
+	for i := 0; i < totalWorkers; i++ {
 		wg.Add(1)
 		i := i
 		// go request(i, responses, &wg, t)
-		go worker(i, responses, jobs, &wg, t)
+		go worker(i, responses, jobs, &wg, insertType)
 
 	}
 
-	for j := 1; j <= total; j++ {
+	for j := 1; j <= totalRequest; j++ {
 		jobs <- j
 	}
 	close(jobs)
